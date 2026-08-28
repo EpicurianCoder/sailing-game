@@ -3,12 +3,16 @@ import math
 # import random
 
 # TWEAK THESE
-MASS_BOAT = 200
-INERTIA_BOAT = 800
+MASS_BOAT = 400
+INERTIA_BOAT = 1000
 OFFSET_CE_CLR = 0.01
-DRAG_HULL = 2
-DRAG_KEEL = 250.0
+DRAG_HULL = 3
+DRAG_KEEL = 9
 DRAG_ROTATION = 2200.0
+
+LATERAL_LIMITER = 9
+
+DRAG_HULL_WIND = 14
 
 RUDDER_POWER = 2000.0
 RUDDER_MAX = math.radians(45)
@@ -21,8 +25,8 @@ TWO_PI = math.pi * 2
 FLAP_ZONE = math.radians(5)
 SAIL_SWING_SPEED = 2.0
 
-BASE_LIFT_MULTIPLIER = 10.0
-BASE_DRAG_MULTIPLIER = 2.0
+BASE_LIFT_MULTIPLIER = 16.0
+BASE_DRAG_MULTIPLIER = 3.0
 
 ALIGN_STEP_SIZE = math.radians(20)
 WING_PARA_STEP_SIZE = math.radians(10)
@@ -75,39 +79,40 @@ def lift_and_drag(state):
         AOA_abs = math.pi - AOA_abs
         
     
-    boom_angle_from_bow = math.pi - abs(sail_angle)
+    opt_aoa = math.radians(18)
     
-    if base_state == "parachute":
-        # Wind is behind. Massive drag, very little airplane-style lift.
-        lift_modifier = 0.1 
-        drag_modifier = 1.5 
-    elif base_state == "wing":
-        # Wind is across the sail. Perfect airplane-style lift.
-        if boom_angle_from_bow < 0.05 and abs(awa) < (math.pi / 4.0):
-            # It's a terrible wing. Drastically cut the airplane lift.
-            lift_modifier = 0.15  
-            # Drag remains high (or higher) because the wind is just slamming into it
-            drag_modifier = 1.5
-        else:
-            # Normal wing conditions
-            lift_modifier = 1.0
-            drag_modifier = 1.0
+    if AOA_abs <= opt_aoa:
+        # Pre-stall: Smooth linear ramp up of lift
+        lift_efficiency = AOA_abs / opt_aoa
+        drag_efficiency = 0.15 + 0.35 * (AOA_abs / opt_aoa)
+    elif AOA_abs <= math.radians(35):
+        # Aerodynamic Stall Zone (18° to 35°): Lift drops rapidly, Drag builds
+        stall_factor = (AOA_abs - opt_aoa) / (math.radians(35) - opt_aoa)
+        lift_efficiency = 1.0 - (0.65 * stall_factor) # Drops to 35% lift
+        drag_efficiency = 0.50 + (0.50 * stall_factor)
     else:
-        lift_modifier = 1.0
-        drag_modifier = 1.0
-        
-    # Lift peaks at 45 degrees, drops to zero when edge-on (0) or perfectly flat (90)
-    raw_lift = (aws ** 2) * math.sin(AOA_abs * 2.0) * (BASE_LIFT_MULTIPLIER * lift_modifier) * sail_size
-    
-    # Drag peaks at 90 degrees (parachute), drops to near zero when edge-on (0)
-    raw_drag = (aws ** 2) * math.sin(AOA_abs) * (BASE_DRAG_MULTIPLIER * drag_modifier) * sail_size
+        # Post-stall / Parachute Zone (> 35°): Pure Drag regime
+        post_stall_factor = (AOA_abs - math.radians(35)) / (math.pi / 2.0 - math.radians(35))
+        lift_efficiency = max(0.05, 0.35 * (1.0 - post_stall_factor))
+        drag_efficiency = 1.0 + (0.8 * post_stall_factor) # High blunt-body drag
 
-    # Drag acts exactly in the direction the wind is blowing TOWARDS
+    # 3. NO-GO / UPWIND PENALTY
+    # If Apparent Wind Angle is less than 35 deg, punish efficiency smoothy
+    abs_awa = abs(awa)
+    if abs_awa < math.radians(35):
+        upwind_penalty = abs_awa / math.radians(35) # Smoothly scales 0.0 -> 1.0
+        lift_efficiency *= (upwind_penalty ** 2)    # Quadratic punishment for pinching
+        drag_efficiency *= (1.5 - 0.5 * upwind_penalty)
+
+    # 4. Calculate Final Raw Forces
+    raw_lift = (aws ** 2) * BASE_LIFT_MULTIPLIER * lift_efficiency * sail_size
+    raw_drag = (aws ** 2) * BASE_DRAG_MULTIPLIER * drag_efficiency * sail_size
+
+    # 5. Project Vectors onto Hull Space
     drag_direction = awa + math.pi
     force_forward_from_drag = raw_drag * math.cos(drag_direction)
     force_lateral_from_drag = raw_drag * math.sin(drag_direction)
 
-    # Lift acts perpendicular to the wind, towards the leeward side
     lift_direction = awa - (get_sign(awa) * (math.pi / 2.0))
     force_forward_from_lift = raw_lift * math.cos(lift_direction)
     force_lateral_from_lift = raw_lift * math.sin(lift_direction)
@@ -363,43 +368,37 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
     print(f'raw_lift: {raw_lift}')
     print(f'raw_drag: {raw_drag}')
     
-    force_drag_hull = (state['velocity_forward'] * abs(state['velocity_forward'])) * DRAG_HULL
-    # Sideways keel drag (prevents the boat from just sliding sideways)
-    force_drag_keel = (state['velocity_lateral_drift'] * abs(state['velocity_lateral_drift'])) * DRAG_KEEL
+    raw_hull_wind_drag = (state['aws'] ** 2) * DRAG_HULL_WIND
+    wind_push_dir = wrap_angle(state['awa'] + math.pi)
+    
+    force_hull_wind_forward = raw_hull_wind_drag * math.cos(wind_push_dir)
+    force_hull_wind_lateral = raw_hull_wind_drag * math.sin(wind_push_dir) * 0.1
 
-    # 3. COMBINE AND APPLY TO MASS (Newton's Second Law: a = F/m)
-    force_net_forward = force_forward - force_drag_hull
+    # 2. Water Resistance Forces
+    if state['velocity_forward'] < 0:
+        force_drag_hull = (state['velocity_forward'] * abs(state['velocity_forward'])) * (DRAG_HULL * 30)
+    else:
+        force_drag_hull = (state['velocity_forward'] * abs(state['velocity_forward'])) * DRAG_HULL
+    
+    # Keel drag becomes LINEAR (instantly resists small lateral slips)
+    force_drag_keel = state['velocity_lateral_drift'] * DRAG_KEEL
+
+    # 3. Combined Net Forces (Sail + Wind on Hull - Water Resistance)
+    force_net_forward = (force_forward + force_hull_wind_forward) - force_drag_hull
+    force_net_lateral = (force_lateral + force_hull_wind_lateral) - force_drag_keel
+
     acceleration_forward = force_net_forward / MASS_BOAT
+    acceleration_lateral = force_net_lateral / ( MASS_BOAT * LATERAL_LIMITER)
 
-    force_net_lateral = force_lateral - force_drag_keel
-    acceleration_lateral = force_net_lateral / MASS_BOAT
-    
-    print(f"force_net_forward is {force_net_forward}")
-    print(f"acceleration_forward is {acceleration_forward}")
-    print(f'force_net_lateral: {force_net_lateral}')
-    print(f'acceleration_lateral: {acceleration_lateral}')
-    
-    # # Calculate the turning forces of the wind
-    # direction_weather_helm = get_sign(state['awa'])  # either 1 or -1 (it is the sign of the AWA)
+    # 4. Rotational Dynamics (Weather Helm & Rudder)
+    direction_weather_helm = get_sign(state['awa'])
+    speed_dampening = 1.0 / (1.0 + (abs(state['velocity_forward']) * 0.15))
+    effective_offset = OFFSET_CE_CLR * speed_dampening
 
-    # # # Lower the effective lever arm offset as forward speed builds
-    # speed_dampening = 1.0 / (1.0 + (abs(state['velocity_forward']) * 0.15))
-    # effective_offset = OFFSET_CE_CLR * speed_dampening
+    torque_spine = (force_lateral * effective_offset)
+    torque_side = force_forward * (state['sail_size'] * math.sin(state['relative_sail_angle']))
+    torque_weather_helm = (torque_spine + torque_side) * direction_weather_helm
 
-    # torque_spine = (force_lateral * effective_offset)
-    # torque_side = force_forward * (state['sail_size'] * math.sin(state['relative_sail_angle']))
-    # torque_weather_helm = (torque_spine + torque_side) * direction_weather_helm * 0.2
-    
-    # # ???
-    # torque_rudder = None
-
-    # force_net_turning = torque_weather_helm + torque_rudder  # 0.4 - 0.1 = 0.3
-
-    # # # NOT MINE
-    # torque_drag_rotation = (state['velocity_boat_rotation'] * abs(state['velocity_boat_rotation'])) * DRAG_ROTATION
-    # force_net_turning -= torque_drag_rotation
-    
-    # TAKE VALUES
     velocity_forward = state.get('velocity_forward', 0.0)
     velocity_lateral_drift = state.get('velocity_lateral_drift', 0.0)
     current_rot_speed = state.get('velocity_boat_rotation', 0.0)
@@ -407,32 +406,26 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
     rudder_angle = physics_inputs_dict.get('rudder', 0.0)
     speed_factor = state['velocity_forward'] 
     
+    if velocity_forward < 0:
+        speed_factor = velocity_forward * 3.0
+    else:
+        speed_factor = velocity_forward
+    
     torque_rudder = math.sin(rudder_angle) * RUDDER_POWER * speed_factor
     torque_drag_rotation = ((current_rot_speed * abs(current_rot_speed)) * DRAG_ROTATION) / 2
-    force_net_turning = torque_rudder - torque_drag_rotation
-
+    
+    # Calculate net turning force
+    force_net_turning = torque_rudder - torque_drag_rotation + (torque_weather_helm * 0.3)
     acceleration_rotational = (force_net_turning / INERTIA_BOAT)
+    
+    # 5. Integrate Velocities
     velocity_boat_rotation = (current_rot_speed / 2) + (acceleration_rotational * DELTA_TIME)
-
-    force_drag_keel = (velocity_lateral_drift * abs(velocity_lateral_drift)) * DRAG_KEEL
-    force_net_keel = force_lateral - force_drag_keel
-    acceleration_lateral = force_net_keel / MASS_BOAT
-
-    force_drag_hull = (velocity_forward * abs(velocity_forward)) * DRAG_HULL
-    force_net_hull = force_forward - force_drag_hull
-    acceleration_forward = force_net_hull / MASS_BOAT
-
     velocity_lateral_drift += acceleration_lateral * DELTA_TIME
     velocity_forward += acceleration_forward * DELTA_TIME
-    
-    print(f"velocity_boat_rotation is {velocity_boat_rotation}")
-    print(f"velocity_lateral_drift is {velocity_lateral_drift}")
-    print(f'velocity_forward: {velocity_forward}')
 
-    # UPDATE VALUES
+    # 6. Save State
     state['velocity_boat_rotation'] = velocity_boat_rotation
     state['velocity_lateral_drift'] = velocity_lateral_drift
     state['velocity_forward'] = velocity_forward
-
 
     return state
