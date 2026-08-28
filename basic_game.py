@@ -23,6 +23,8 @@ clock = pygame.time.Clock()
 # Sourced from the physics engine limits
 MAX_SAIL_ANGLE = 1.57 
 
+ENGINE_DT = 1.0 / 1.0
+
 # Initial physics state dictionary
 game_state = {
     'global_wind_dir': 0.0,
@@ -131,10 +133,10 @@ def draw_boat(surface, state):
     sail_angle = add_angle_wrap(state['boat_heading'], state['relative_sail_angle'])
     
     visual_length = 20
-    sail_end_x = 128 + math.sin(sail_angle) * visual_length
-    sail_end_y = 128 - math.cos(sail_angle) * visual_length
+    sail_end_x = front_x + math.sin(sail_angle) * visual_length
+    sail_end_y = front_y - math.cos(sail_angle) * visual_length
 
-    draw_arrow(surface, (145, 89, 102), (128, 128), (sail_end_x, sail_end_y), 3, 5)
+    draw_arrow(surface, (145, 89, 102), (front_x, front_y), (sail_end_x, sail_end_y), 3, 5)
     
 def pil_to_land_channel(pil_image):
     mapped_image = pil_image.point(lambda p: 0 if p == 1 else 255).convert("RGB")
@@ -218,11 +220,11 @@ while running:
                 
             if event.key == pygame.K_LEFT:
                 # Accumulates the inputs from a frame step
-                new_rudder = normalized_inputs['rudder'] - 0.15
+                new_rudder = normalized_inputs['rudder'] - 0.1
                 normalized_inputs["rudder"] = round(max(-1.0, min(1.0, new_rudder)), 2)
 
             elif event.key == pygame.K_RIGHT:
-                new_rudder = normalized_inputs['rudder'] + 0.15
+                new_rudder = normalized_inputs['rudder'] + 0.1
                 normalized_inputs["rudder"] = round(max(-1.0, min(1.0, new_rudder)), 2)
 
             elif event.key == pygame.K_a:
@@ -249,25 +251,22 @@ while running:
     # Step the Physics Engine
     next_state = boat_step(game_state, physics_inputs_dict)
     
-    # # Update Heading with rotational speed
-    # engine_dt = 1.0 / 60.0 
+    # 1. Update the Heading (Multiply angular velocity by DT)
+    next_state['boat_heading'] = add_angle_wrap(
+        next_state['boat_heading'], 
+        next_state['velocity_boat_rotation'] * ENGINE_DT
+    )
     
-    # # 1. Update the Heading (Multiply angular velocity by DT)
-    # game_state['boat_heading'] = add_angle_wrap(
-    #     game_state['boat_heading'], 
-    #     next_state['velocity_boat_rotation'] * engine_dt
-    # )
-    
-    # # 2. Calculate the X and Y movement components (Multiply speeds by DT)
-    # vel_x = (math.sin(game_state['boat_heading']) * next_state['velocity_forward'] * engine_dt) + \
-    #         (math.cos(game_state['boat_heading']) * next_state['velocity_lateral_drift'] * engine_dt)
+    # 2. Calculate the X and Y movement components (Multiply speeds by DT)
+    vel_x = (math.sin(next_state['boat_heading']) * next_state['velocity_forward'] * ENGINE_DT) + \
+            (math.cos(next_state['boat_heading']) * next_state['velocity_lateral_drift'] * ENGINE_DT)
             
-    # vel_y = (math.cos(game_state['boat_heading']) * next_state['velocity_forward'] * engine_dt) - \
-    #         (math.sin(game_state['boat_heading']) * next_state['velocity_lateral_drift'] * engine_dt)
+    vel_y = (math.cos(next_state['boat_heading']) * next_state['velocity_forward'] * ENGINE_DT) - \
+            (math.sin(next_state['boat_heading']) * next_state['velocity_lateral_drift'] * ENGINE_DT)
             
-    # # 3. Apply to coordinates (Using modulo % to wrap around the screen edges)
-    # game_state['boat_x'] = (game_state['boat_x'] + vel_x) % WIDTH
-    # game_state['boat_y'] = (game_state['boat_y'] + vel_y) % HEIGHT
+    # 3. Apply to coordinates (Using modulo % to wrap around the screen edges)
+    next_state['boat_x'] = (next_state['boat_x'] + vel_x) % WIDTH
+    next_state['boat_y'] = (next_state['boat_y'] + vel_y) % HEIGHT
 
     # Draw WATER
     screen.fill((30, 144, 255)) # Simple ocean blue background
@@ -276,8 +275,8 @@ while running:
     screen.blit(land_channel, (0, 0))
     
     # Draw WIND (Global)
-    global_wind_dir_end_x = 30 + math.sin(game_state['global_wind_dir']) * WIND_SCALE
-    global_wind_dir_end_y = 30 - math.cos(game_state['global_wind_dir']) * WIND_SCALE
+    global_wind_dir_end_x = 30 + math.sin(next_state['global_wind_dir']) * WIND_SCALE
+    global_wind_dir_end_y = 30 - math.cos(next_state['global_wind_dir']) * WIND_SCALE
     draw_arrow(screen, (255, 255, 100), (30, 30), (global_wind_dir_end_x, global_wind_dir_end_y), 3, 10)
     
     # Draw BOAT
@@ -285,6 +284,24 @@ while running:
     draw_boat(screen, next_state)
     
     stack = FeatureGenerator.build_7_channel_grid(next_state, land_PIL)
+    
+    if framecount % 4 == 0:
+        if normalized_inputs["rudder"] > 0.8:
+            normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.2
+        elif normalized_inputs["rudder"] > 0.5:
+            normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.15
+        elif normalized_inputs["rudder"] > 0.1:
+            normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.1
+        elif normalized_inputs["rudder"] > 0.0:
+            normalized_inputs["rudder"] = 0.0
+        elif normalized_inputs["rudder"] < - 0.8:
+            normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.2
+        elif normalized_inputs["rudder"] < - 0.5:
+            normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.15
+        elif normalized_inputs["rudder"] < - 0.1:
+            normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.1
+        elif normalized_inputs["rudder"] < 0.0:
+            normalized_inputs["rudder"] = 0.0
     
     # Update States
     # awa:          START of each frame, ENV dependant
