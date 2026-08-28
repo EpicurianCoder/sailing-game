@@ -1,4 +1,4 @@
-# requirements: numpy, Pillow
+# requirements: Pillow, numpy
 
 import pygame
 import math
@@ -7,6 +7,25 @@ import asyncio
 from boat_physics import boat_step
 import sys
 
+from PIL import Image, ImageDraw
+import numpy as np
+
+# Simulation Settings
+MAP_SIZE = 256
+
+# colors
+WATER_COLOR = (173, 216, 230)
+LAND_COLOR = (210, 180, 140)
+BOAT_COLOR = (255, 255, 255)
+SAIL_COLOR = (255, 0, 255)
+WIND_COLOR = (255, 0, 0)
+
+# Vector Annotations
+SPEED_VEC_COLOR = (0, 0, 255)     # Blue
+WIND_VEC_COLOR = (0, 255, 0)      # Green
+OPT_SAIL_COLOR = (255, 255, 0)    # Yellow
+RESULTANT_COLOR = (255, 165, 0)   # Orange
+FWD_FORCE_COLOR = (0, 255, 255)   # Cyan
 
 # --- 1. ENVIRONMENT SETUP ---
 WIDTH, HEIGHT = 256, 256
@@ -21,6 +40,67 @@ WIND_SPEED = 4.0
 MAX_SAIL_ANGLE = 1.57 
 
 ENGINE_DT = 1.0 / 1.0
+
+
+class FeatureGenerator:
+    @staticmethod
+    def gen_land_feature(map_size=MAP_SIZE):
+        """
+        Generates the procedural landmasses and protects starting/finish zones.
+        Returns: (PIL_Image, int_island_count, float_coverage_percentage)
+        """
+        attempts = 0
+        while True:
+            attempts += 1
+            if attempts > 50:
+                print("Too many attempts, settling for current map.")
+                break
+                
+            feature_image = Image.new("L", (map_size, map_size), 0)
+            draw = ImageDraw.Draw(feature_image)
+
+            num_landmasses = random.randint(1, 4)
+            for i in range(num_landmasses):
+                base_radius = random.uniform(14.0, 35.0)
+                amplitude = random.uniform(8.0, 15.0)
+                center_x, center_y = random.uniform(0, map_size), random.uniform(0, map_size)
+                phases = [random.uniform(0, math.pi * 2) for _ in range(4)]
+
+                points = []
+                num_steps = 100
+                for step in range(num_steps):
+                    theta = (step / num_steps) * (2 * math.pi)
+                    noise_val = (
+                        math.sin(theta * 1 + phases[0]) * 1.0 +
+                        math.sin(theta * 2 + phases[1]) * 0.5 +
+                        math.sin(theta * 4 + phases[2]) * 0.25 +
+                        math.sin(theta * 8 + phases[3]) * 0.125
+                    ) / 1.875
+                    
+                    r = base_radius + (noise_val * amplitude)
+                    points.append((center_x + r * math.cos(theta), center_y + r * math.sin(theta)))
+
+                draw.polygon(points, fill=1)
+
+            # --- THE C-OPTIMIZED FIX ---
+            # Convert to numpy array for instant math
+            img_array = np.asarray(feature_image)
+            
+            # 1. Instantly sum all pixels
+            land_pixels = img_array.sum()
+            coverage = land_pixels / (map_size * map_size)
+            
+            if coverage > 0.25:
+                continue
+
+            # 2. Instantly check the starting box (Y: 108 to 148, X: 78 to 178)
+            starting_box = img_array[108:148, 78:178]
+            if starting_box.any():  # If any pixel is 1, it fails
+                continue
+
+            return feature_image, num_landmasses, coverage
+            
+        return feature_image, num_landmasses, coverage
 
 
 def to_physics_dimensions(normalized_inputs_dict):
@@ -128,17 +208,14 @@ def print_game_state(game_state, framecount):
 
     print(f"framecount is {framecount}")
     
+print("** Booting Pygame...")
+pygame.init()
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Sailing Engine")
+clock = pygame.time.Clock()
+    
 async def main():
     try:
-        print("** Booting Pygame...")
-        pygame.init()
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("Sailing Engine")
-        clock = pygame.time.Clock()
-        
-        print("2. Downloading/Loading Pillow...")
-        # Move the import DOWN HERE, inside the try block!
-        from feature_gen import FeatureGenerator
         
         # Initial physics state dictionary
         game_state = {
