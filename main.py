@@ -1,11 +1,10 @@
-# requirements: pillow
+# requirements: numpy, Pillow
 
 import pygame
 import math
 import random
 import asyncio
 from boat_physics import boat_step
-from feature_gen import FeatureGenerator
 import sys
 
 
@@ -130,194 +129,220 @@ def print_game_state(game_state, framecount):
     print(f"framecount is {framecount}")
     
 async def main():
-    pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Sailing Engine")
-    clock = pygame.time.Clock()
-    
-    # Initial physics state dictionary
-    game_state = {
-        'global_wind_dir': 0.0,
-        'awa': 0.0,                       
-        'aws': 0.0,                       
-        'velocity_boat_rotation': 0.0,       
-        'velocity_lateral_drift': 0.0,    
-        'velocity_forward': 0.0,          
-        'sail_size': 1.0,                 
-        'sail_angle': 0.0,
-        'relative_sail_angle': 0.0,         
-        'lockout_target_angle': 0.0,      
-        'out_of_control': -1,
-        'boat_heading': 0.0,
-        'boat_x': 0,
-        'boat_y': 0,
-        'trajectory_history': [],
-        'stress_value': 0.0,
-        'state': 'unassigned',
-        'did_snap': None
-    }
-
-    # Continuous Inputs (all continuous, two with negative values)
-    normalized_inputs = {
-        'rudder': 0.0,       # Range: [-1.0, 1.0]
-        'rope_length': 0.0,  # Range: [0.0, 1.0]
-        'sail_size': 1.0     # Range: [0.0, 1.0]
-    }
-
-    # Physics Based inputs (2 radians floats and 1 int)
-    physics_inputs = {
-        'rudder': 0.0,
-        'rope_length': 0.0,
-        'sail_size': 1
-    }
-
-    # MAIN GAME LOOP
-    running = True
-    
-    # GENERATE GLOBAL WIND AND BOAT VALUE FOR START
-    global_wind_dir, boat_heading, relative_sail_angle, boat_x, boat_y = initialize_state()
-    
-    game_state['global_wind_dir'] = global_wind_dir
-    game_state['aws'] = WIND_SPEED  # set windspeed
-    
-    game_state['boat_x'] = boat_x
-    game_state['boat_y'] = boat_y
-    game_state['boat_heading'] = boat_heading
-    
-    game_state['relative_sail_angle'] = relative_sail_angle
-    framecount = 0
-    
-    print("*** Initialized Values:")
-    print_game_state(game_state, framecount)
-    
-    land_PIL, num_landmasses, coverage = FeatureGenerator.gen_land_feature()
-    land_channel = pil_to_land_channel(land_PIL)
-    
-    print(f"\nCoverage: {coverage}\n")
-    print(f"\nNo. of Landmasses: {num_landmasses}\n")
-    
-    pygame.init()
-    # pygame.key.set_repeat(150, 50)
-    
-    running = True
-    
-    while running:
-        # Processes EVERY button event during the frame (limit user input rates HERE!!!)
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-    
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    # Accumulates the inputs from a frame step
-                    running = False
-                    break
-                if event.key == pygame.K_UP:
-                    # Accumulates the inputs from a frame step
-                    new_length = normalized_inputs['rope_length'] + 0.05
-                    normalized_inputs["rope_length"] = round(max(0.0, min(1.0, new_length)), 2)
-    
-                elif event.key == pygame.K_DOWN:
-                    new_length = normalized_inputs['rope_length'] - 0.05
-                    normalized_inputs["rope_length"] = round(max(0.0, min(1.0, new_length)), 2)
-                    
-                if event.key == pygame.K_LEFT:
-                    # Accumulates the inputs from a frame step
-                    new_rudder = normalized_inputs['rudder'] - 0.1
-                    normalized_inputs["rudder"] = round(max(-1.0, min(1.0, new_rudder)), 2)
-    
-                elif event.key == pygame.K_RIGHT:
-                    new_rudder = normalized_inputs['rudder'] + 0.1
-                    normalized_inputs["rudder"] = round(max(-1.0, min(1.0, new_rudder)), 2)
-    
-                elif event.key == pygame.K_a:
-                    game_state["global_wind_dir"] = add_angle_wrap(game_state['global_wind_dir'], - math.pi/20)
-    
-                elif event.key == pygame.K_s:
-                    game_state["global_wind_dir"] = add_angle_wrap(game_state['global_wind_dir'], + math.pi/20)
+    try:
+        print("** Booting Pygame...")
+        pygame.init()
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Sailing Engine")
+        clock = pygame.time.Clock()
         
-        if not running:
-            break
-    
-        if running:
-            pygame.time.delay(200)
-            
-        # Get USER INPUT and calcualte current AWA
-        physics_inputs_dict = to_physics_dimensions(normalized_inputs)
-        game_state['awa'] = calculate_awa(game_state['global_wind_dir'], game_state['boat_heading'])
+        print("2. Downloading/Loading Pillow...")
+        # Move the import DOWN HERE, inside the try block!
+        from feature_gen import FeatureGenerator
         
-        print("*** Step: ")
+        # Initial physics state dictionary
+        game_state = {
+            'global_wind_dir': 0.0,
+            'awa': 0.0,                       
+            'aws': 0.0,                       
+            'velocity_boat_rotation': 0.0,       
+            'velocity_lateral_drift': 0.0,    
+            'velocity_forward': 0.0,          
+            'sail_size': 1.0,                 
+            'sail_angle': 0.0,
+            'relative_sail_angle': 0.0,         
+            'lockout_target_angle': 0.0,      
+            'out_of_control': -1,
+            'boat_heading': 0.0,
+            'boat_x': 0,
+            'boat_y': 0,
+            'trajectory_history': [],
+            'stress_value': 0.0,
+            'state': 'unassigned',
+            'did_snap': None
+        }
+    
+        # Continuous Inputs (all continuous, two with negative values)
+        normalized_inputs = {
+            'rudder': 0.0,       # Range: [-1.0, 1.0]
+            'rope_length': 0.0,  # Range: [0.0, 1.0]
+            'sail_size': 1.0     # Range: [0.0, 1.0]
+        }
+    
+        # Physics Based inputs (2 radians floats and 1 int)
+        physics_inputs = {
+            'rudder': 0.0,
+            'rope_length': 0.0,
+            'sail_size': 1
+        }
+    
+        # MAIN GAME LOOP
+        running = True
+        
+        print("** Initializing boat state...")
+        # GENERATE GLOBAL WIND AND BOAT VALUE FOR START
+        global_wind_dir, boat_heading, relative_sail_angle, boat_x, boat_y = initialize_state()
+        
+        game_state['global_wind_dir'] = global_wind_dir
+        game_state['aws'] = WIND_SPEED  # set windspeed
+        
+        game_state['boat_x'] = boat_x
+        game_state['boat_y'] = boat_y
+        game_state['boat_heading'] = boat_heading
+        
+        game_state['relative_sail_angle'] = relative_sail_angle
+        framecount = 0
+        
+        print("*** Initialized Values:")
         print_game_state(game_state, framecount)
-        framecount += 1
-        print_inputs(normalized_inputs, physics_inputs_dict)
         
-        # Step the Physics Engine
-        next_state = boat_step(game_state, physics_inputs_dict)
+        print("** Generating Landmasses... \n")
+        land_PIL, num_landmasses, coverage = FeatureGenerator.gen_land_feature()
+        land_channel = pil_to_land_channel(land_PIL)
+        print("Land generated successfully! Starting main loop...")
         
-        # 1. Update the Heading (Multiply angular velocity by DT)
-        next_state['boat_heading'] = add_angle_wrap(
-            next_state['boat_heading'], 
-            next_state['velocity_boat_rotation'] * ENGINE_DT
-        )
+        print(f"\nCoverage: {coverage}\n")
+        print(f"\nNo. of Landmasses: {num_landmasses}\n")
         
-        # 2. Calculate the X and Y movement components (Multiply speeds by DT)
-        vel_x = (math.sin(next_state['boat_heading']) * next_state['velocity_forward'] * ENGINE_DT) + \
-                (math.cos(next_state['boat_heading']) * next_state['velocity_lateral_drift'] * ENGINE_DT)
+        pygame.init()
+        # pygame.key.set_repeat(150, 50)
+        
+        running = True
+        
+        while running:
+            # Processes EVERY button event during the frame (limit user input rates HERE!!!)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+        
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        # Accumulates the inputs from a frame step
+                        running = False
+                        break
+                    if event.key == pygame.K_UP:
+                        # Accumulates the inputs from a frame step
+                        new_length = normalized_inputs['rope_length'] + 0.05
+                        normalized_inputs["rope_length"] = round(max(0.0, min(1.0, new_length)), 2)
+        
+                    elif event.key == pygame.K_DOWN:
+                        new_length = normalized_inputs['rope_length'] - 0.05
+                        normalized_inputs["rope_length"] = round(max(0.0, min(1.0, new_length)), 2)
+                        
+                    if event.key == pygame.K_LEFT:
+                        # Accumulates the inputs from a frame step
+                        new_rudder = normalized_inputs['rudder'] - 0.1
+                        normalized_inputs["rudder"] = round(max(-1.0, min(1.0, new_rudder)), 2)
+        
+                    elif event.key == pygame.K_RIGHT:
+                        new_rudder = normalized_inputs['rudder'] + 0.1
+                        normalized_inputs["rudder"] = round(max(-1.0, min(1.0, new_rudder)), 2)
+        
+                    elif event.key == pygame.K_a:
+                        game_state["global_wind_dir"] = add_angle_wrap(game_state['global_wind_dir'], - math.pi/20)
+        
+                    elif event.key == pygame.K_s:
+                        game_state["global_wind_dir"] = add_angle_wrap(game_state['global_wind_dir'], + math.pi/20)
+            
+            if not running:
+                break
+        
+            if running:
+                pygame.time.delay(200)
                 
-        vel_y = (math.cos(next_state['boat_heading']) * next_state['velocity_forward'] * ENGINE_DT) - \
-                (math.sin(next_state['boat_heading']) * next_state['velocity_lateral_drift'] * ENGINE_DT)
-                
-        # 3. Apply to coordinates (Using modulo % to wrap around the screen edges)
-        next_state['boat_x'] = (next_state['boat_x'] + vel_x) % WIDTH
-        next_state['boat_y'] = (next_state['boat_y'] + vel_y) % HEIGHT
-    
-        # Draw WATER
-        screen.fill((30, 144, 255)) # Simple ocean blue background
+            # Get USER INPUT and calcualte current AWA
+            physics_inputs_dict = to_physics_dimensions(normalized_inputs)
+            game_state['awa'] = calculate_awa(game_state['global_wind_dir'], game_state['boat_heading'])
+            
+            print("*** Step: ")
+            print_game_state(game_state, framecount)
+            framecount += 1
+            print_inputs(normalized_inputs, physics_inputs_dict)
+            
+            # Step the Physics Engine
+            next_state = boat_step(game_state, physics_inputs_dict)
+            
+            # 1. Update the Heading (Multiply angular velocity by DT)
+            next_state['boat_heading'] = add_angle_wrap(
+                next_state['boat_heading'], 
+                next_state['velocity_boat_rotation'] * ENGINE_DT
+            )
+            
+            # 2. Calculate the X and Y movement components (Multiply speeds by DT)
+            vel_x = (math.sin(next_state['boat_heading']) * next_state['velocity_forward'] * ENGINE_DT) + \
+                    (math.cos(next_state['boat_heading']) * next_state['velocity_lateral_drift'] * ENGINE_DT)
+                    
+            vel_y = (math.cos(next_state['boat_heading']) * next_state['velocity_forward'] * ENGINE_DT) - \
+                    (math.sin(next_state['boat_heading']) * next_state['velocity_lateral_drift'] * ENGINE_DT)
+                    
+            # 3. Apply to coordinates (Using modulo % to wrap around the screen edges)
+            next_state['boat_x'] = (next_state['boat_x'] + vel_x) % WIDTH
+            next_state['boat_y'] = (next_state['boat_y'] + vel_y) % HEIGHT
         
-        # Draw LAND
-        screen.blit(land_channel, (0, 0))
+            # Draw WATER
+            screen.fill((30, 144, 255)) # Simple ocean blue background
+            
+            # Draw LAND
+            screen.blit(land_channel, (0, 0))
+            
+            # Draw WIND (Global)
+            global_wind_dir_end_x = 30 + math.sin(next_state['global_wind_dir']) * WIND_SCALE
+            global_wind_dir_end_y = 30 - math.cos(next_state['global_wind_dir']) * WIND_SCALE
+            draw_arrow(screen, (255, 255, 100), (30, 30), (global_wind_dir_end_x, global_wind_dir_end_y), 3, 10)
+            
+            # Draw BOAT
+            # boat_feature = FeatureGenerator.get_boat_feature_layer(next_state['boat_y'], next_state['boat_x'], next_state['boat_heading'])
+            draw_boat(screen, next_state)
+            
+            # stack = FeatureGenerator.build_7_channel_grid(next_state, land_PIL)
+            
+            if framecount % 4 == 0:
+                if normalized_inputs["rudder"] > 0.8:
+                    normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.2
+                elif normalized_inputs["rudder"] > 0.5:
+                    normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.15
+                elif normalized_inputs["rudder"] > 0.1:
+                    normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.1
+                elif normalized_inputs["rudder"] > 0.0:
+                    normalized_inputs["rudder"] = 0.0
+                elif normalized_inputs["rudder"] < - 0.8:
+                    normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.2
+                elif normalized_inputs["rudder"] < - 0.5:
+                    normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.15
+                elif normalized_inputs["rudder"] < - 0.1:
+                    normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.1
+                elif normalized_inputs["rudder"] < 0.0:
+                    normalized_inputs["rudder"] = 0.0
+            
+            # Update States
+            # awa:          START of each frame, ENV dependant
+            # rope_length:  START of each frame, USR dependant
+            
+            game_state = next_state
+            
+            pygame.display.flip()
+            clock.tick(FPS)
+            await asyncio.sleep(0)
         
-        # Draw WIND (Global)
-        global_wind_dir_end_x = 30 + math.sin(next_state['global_wind_dir']) * WIND_SCALE
-        global_wind_dir_end_y = 30 - math.cos(next_state['global_wind_dir']) * WIND_SCALE
-        draw_arrow(screen, (255, 255, 100), (30, 30), (global_wind_dir_end_x, global_wind_dir_end_y), 3, 10)
+        pygame.quit()
+        sys.exit()
+    except Exception as e:
+        # 1. Grab the full Python crash report
+        import traceback
+        error_msg = traceback.format_exc()
         
-        # Draw BOAT
-        # boat_feature = FeatureGenerator.get_boat_feature_layer(next_state['boat_y'], next_state['boat_x'], next_state['boat_heading'])
-        draw_boat(screen, next_state)
-        
-        # stack = FeatureGenerator.build_7_channel_grid(next_state, land_PIL)
-        
-        if framecount % 4 == 0:
-            if normalized_inputs["rudder"] > 0.8:
-                normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.2
-            elif normalized_inputs["rudder"] > 0.5:
-                normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.15
-            elif normalized_inputs["rudder"] > 0.1:
-                normalized_inputs["rudder"] = normalized_inputs["rudder"] - 0.1
-            elif normalized_inputs["rudder"] > 0.0:
-                normalized_inputs["rudder"] = 0.0
-            elif normalized_inputs["rudder"] < - 0.8:
-                normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.2
-            elif normalized_inputs["rudder"] < - 0.5:
-                normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.15
-            elif normalized_inputs["rudder"] < - 0.1:
-                normalized_inputs["rudder"] = normalized_inputs["rudder"] + 0.1
-            elif normalized_inputs["rudder"] < 0.0:
-                normalized_inputs["rudder"] = 0.0
-        
-        # Update States
-        # awa:          START of each frame, ENV dependant
-        # rope_length:  START of each frame, USR dependant
-        
-        game_state = next_state
-        
-        pygame.display.flip()
-        clock.tick(FPS)
-        await asyncio.sleep(0)
-    
-    pygame.quit()
-    sys.exit()
+        # 2. Force it into the Browser's F12 Console
+        import sys
+        if sys.platform == "emscripten":
+            import js
+            js.console.error("!!! PYTHON CRASHED !!!")
+            js.console.error(error_msg)
+        else:
+            print(error_msg)
+            
+        # Keep the page alive so you can read the error
+        while True:
+            await asyncio.sleep(1)
     
 if __name__ == "__main__":
     asyncio.run(main())
