@@ -99,7 +99,7 @@ async def physics_engine(websocket: WebSocket):
             
             # 2. Physics inputs mapping
             physics_inputs = {
-                'rudder': current_inputs['rudder'] * math.radians(25),
+                'rudder': current_inputs['rudder'] * math.radians(35),
                 'rope_length': current_inputs['rope_length'] * math.radians(90),
                 'sail_size': 4
             }
