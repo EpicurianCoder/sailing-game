@@ -28,7 +28,7 @@ game_state = {
     'global_wind_dir': 0.0,
     'awa': 0.0,                       
     'aws': 0.0,                       
-    'speed_boat_rotation': 0.0,       
+    'velocity_boat_rotation': 0.0,       
     'velocity_lateral_drift': 0.0,    
     'velocity_forward': 0.0,          
     'sail_size': 1.0,                 
@@ -158,20 +158,12 @@ def print_inputs(game_inputs_raw, game_inputs_physics):
     print(f"rudder is {game_inputs_raw['rudder']}")
     print(f"sail_size: {game_inputs_raw['sail_size']}")
 
-def print_game_state(game_state):
+def print_game_state(game_state, framecount):
     print(f"global_wind_dir is {game_state['global_wind_dir']}")
     print(f"aws is {game_state['aws']}")
     print(f"awa: {game_state['awa']}")
 
-    print(f"sail_angle is {game_state['sail_angle']}")
-    print(f"relative_sail_angle is {game_state['relative_sail_angle']}")
-
-    print(f"boat_x is {game_state['boat_x']}")
-    print(f"boat_y is {game_state['boat_y']}")
-    print(f"boat_heading is {game_state['boat_heading']}")
-
-    print(f"out_of_control: {game_state['out_of_control']}\n")
-    print(f"state: {game_state['state']}\n")
+    print(f"framecount is {framecount}")
     
 
 # MAIN GAME LOOP
@@ -188,9 +180,10 @@ game_state['boat_y'] = boat_y
 game_state['boat_heading'] = boat_heading
 
 game_state['relative_sail_angle'] = relative_sail_angle
+framecount = 0
 
 print("*** Initialized Values:")
-print_game_state(game_state)
+print_game_state(game_state, framecount)
 
 land_PIL, num_landmasses, coverage = FeatureGenerator.gen_land_feature()
 land_channel = pil_to_land_channel(land_PIL)
@@ -225,11 +218,11 @@ while running:
                 
             if event.key == pygame.K_LEFT:
                 # Accumulates the inputs from a frame step
-                new_rudder = normalized_inputs['rudder'] - 0.05
+                new_rudder = normalized_inputs['rudder'] - 0.15
                 normalized_inputs["rudder"] = round(max(-1.0, min(1.0, new_rudder)), 2)
 
             elif event.key == pygame.K_RIGHT:
-                new_rudder = normalized_inputs['rudder'] + 0.05
+                new_rudder = normalized_inputs['rudder'] + 0.15
                 normalized_inputs["rudder"] = round(max(-1.0, min(1.0, new_rudder)), 2)
 
             elif event.key == pygame.K_a:
@@ -249,7 +242,8 @@ while running:
     game_state['awa'] = calculate_awa(game_state['global_wind_dir'], game_state['boat_heading'])
     
     print("*** Step: ")
-    print_game_state(game_state)
+    print_game_state(game_state, framecount)
+    framecount += 1
     print_inputs(normalized_inputs, physics_inputs_dict)
     
     # Step the Physics Engine
@@ -261,7 +255,7 @@ while running:
     # # 1. Update the Heading (Multiply angular velocity by DT)
     # game_state['boat_heading'] = add_angle_wrap(
     #     game_state['boat_heading'], 
-    #     next_state['speed_boat_rotation'] * engine_dt
+    #     next_state['velocity_boat_rotation'] * engine_dt
     # )
     
     # # 2. Calculate the X and Y movement components (Multiply speeds by DT)
