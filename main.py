@@ -1,15 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Aug 28 14:07:41 2026
-
-@author: soloist
-"""
+# requirements: pillow
 
 import pygame
 import math
 import random
-import asyncio  # 1. IMPORT ASYNCIO
+import asyncio
 from boat_physics import boat_step
 from feature_gen import FeatureGenerator
 import sys
