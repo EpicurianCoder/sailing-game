@@ -1,16 +1,17 @@
 import math
-from boat_physics_helpers import lift_and_drag, get_sign
-import random
+# from boat_physics_helpers import lift_and_drag, get_sign
+# import random
 
-DRAG_HULL = 2
-DRAG_KEEL = 250.0
-DRAG_ROTATION = 1800.0
-SAIL_SWING_SPEED = 2.0
-RUDDER_POWER = 5000.0
-RUDDER_MAX = math.radians(45)
+# TWEAK THESE
 MASS_BOAT = 200
 INERTIA_BOAT = 1400
 OFFSET_CE_CLR = 0.01
+DRAG_HULL = 2
+DRAG_KEEL = 250.0
+DRAG_ROTATION = 1800.0
+
+RUDDER_POWER = 5000.0
+RUDDER_MAX = math.radians(45)
 DELTA_TIME = 1.0 / 60.0
 MAX_SAIL_ANGLE = 1.57
 SAIL_SWING_STEP = math.radians(10)
@@ -18,7 +19,10 @@ THRESHOLD_15_DEG = math.radians(5)
 DEGREE_TO_RAD = math.pi / 180
 TWO_PI = math.pi * 2
 FLAP_ZONE = math.radians(5)
-SAIL_MOVE_INCREMENT = math.radians(10)
+SAIL_SWING_SPEED = 2.0
+
+BASE_LIFT_MULTIPLIER = 10.0
+BASE_DRAG_MULTIPLIER = 2.0
 
 ALIGN_STEP_SIZE = math.radians(20)
 WING_PARA_STEP_SIZE = math.radians(10)
@@ -42,6 +46,66 @@ WING_PARA_STEP_SIZE = math.radians(10)
 # EVERYTHING is radians
 # Clockwise if angle_to_add is positive
 # Counter-clockwise if negative
+
+
+def get_sign(value):
+    return 1 if value >= 0 else -1
+
+def lift_and_drag(state):
+    
+    awa = state['awa']
+    aws = state['aws']
+    sail_angle = state['relative_sail_angle']
+    sail_size = state['sail_size']
+    sail_state = state['state']
+    
+    base_state = sail_state.split(" ")[0]
+    
+    if base_state == "align":
+        return 0.0, 0.0, 0.0, 0.0
+    
+    if base_state == "dead":
+        # Minimal friction drag, zero lift
+        return 0.0, 0.0, 0.0, 0.1 * sail_size
+    
+    AOA_abs = abs(abs(awa) - abs(sail_angle))
+    
+    if base_state == "parachute":
+        # Wind is behind. Massive drag, very little airplane-style lift.
+        lift_modifier = 0.1 
+        drag_modifier = 1.5 
+    elif base_state == "wing":
+        # Wind is across the sail. Perfect airplane-style lift.
+        if abs(awa) > math.pi / 4:
+            lift_modifier = 1.0
+            drag_modifier = 1.0
+        else: 
+            lift_modifier = 0.2
+            drag_modifier = 0.1
+    else:
+        lift_modifier = 1.0
+        drag_modifier = 1.0
+        
+    # Lift peaks at 45 degrees, drops to zero when edge-on (0) or perfectly flat (90)
+    raw_lift = (aws ** 2) * math.sin(AOA_abs * 2.0) * (BASE_LIFT_MULTIPLIER * lift_modifier) * sail_size
+    
+    # Drag peaks at 90 degrees (parachute), drops to near zero when edge-on (0)
+    raw_drag = (aws ** 2) * math.sin(AOA_abs) * (BASE_DRAG_MULTIPLIER * drag_modifier) * sail_size
+
+    # Drag acts exactly in the direction the wind is blowing TOWARDS
+    drag_direction = awa + math.pi
+    force_forward_from_drag = raw_drag * math.cos(drag_direction)
+    force_lateral_from_drag = raw_drag * math.sin(drag_direction)
+
+    # Lift acts perpendicular to the wind, towards the leeward side
+    lift_direction = awa - (get_sign(awa) * (math.pi / 2.0))
+    force_forward_from_lift = raw_lift * math.cos(lift_direction)
+    force_lateral_from_lift = raw_lift * math.sin(lift_direction)
+
+    force_forward = force_forward_from_lift + force_forward_from_drag
+    force_lateral = force_lateral_from_lift + force_lateral_from_drag
+
+    return force_forward, force_lateral, raw_lift, raw_drag
 
 
 def is_in_slice(target, bound1, bound2, bounds="[]"):
@@ -246,7 +310,7 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
         if target_point < 0 and abs(target_point) < math.pi /2:
             target_point = -math.pi /2
         travel_dist = abs(wrap_angle(state['relative_sail_angle'] - target_point))
-        if travel_dist < SAIL_MOVE_INCREMENT:
+        if travel_dist < ALIGN_STEP_SIZE:
            state['relative_sail_angle'] = target_point
            print(f"Attempting to jump to target point {target_point}")
         else:
@@ -273,7 +337,7 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
             # needs to move DOWN
             dir_swing = snap_side
         
-        if travel_dist < SAIL_MOVE_INCREMENT:
+        if travel_dist < WING_PARA_STEP_SIZE:
            state['relative_sail_angle'] = target_point
            print("Attempting to jump to full sail")
         else:
@@ -312,7 +376,31 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
     print(f"temp_state is {temp_state}")
     print(f'CONDITION: {condition}')
     
+    # Determine how to handle GOOD WIND
+    force_forward, force_lateral, raw_lift, raw_drag = lift_and_drag(state)
     
+    print(f"force_forward is {force_forward}")
+    print(f"force_lateral is {force_lateral}")
+    print(f'raw_lift: {raw_lift}')
+    print(f'raw_drag: {raw_drag}')
+    
+    
+    
+    force_drag_hull = (state['velocity_forward'] * abs(state['velocity_forward'])) * DRAG_HULL
+    # Sideways keel drag (prevents the boat from just sliding sideways)
+    force_drag_keel = (state['velocity_lateral_drift'] * abs(state['velocity_lateral_drift'])) * DRAG_KEEL
+
+    # 3. COMBINE AND APPLY TO MASS (Newton's Second Law: a = F/m)
+    force_net_forward = force_forward - force_drag_hull
+    acceleration_forward = force_net_forward / MASS_BOAT
+
+    force_net_lateral = force_lateral - force_drag_keel
+    acceleration_lateral = force_net_lateral / MASS_BOAT
+    
+    print(f"force_net_forward is {force_net_forward}")
+    print(f"acceleration_forward is {acceleration_forward}")
+    print(f'force_net_lateral: {force_net_lateral}')
+    print(f'acceleration_lateral: {acceleration_lateral}')
     
     # print(f"rope_length_angle is {rope_length_angle}")
     
@@ -359,7 +447,7 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
     # # General Sail Forces
     # force_forward, force_lateral, raw_lift, raw_drag = lift_and_drag(awa, aws, relative_sail_angle, sail_size)
 
-    # # Calculate the turning forces of the wind
+    # Calculate the turning forces of the wind
     # direction_weather_helm = get_sign(awa)  # either 1 or -1 (it is the sign of the AWA)
 
     # # Lower the effective lever arm offset as forward speed builds
