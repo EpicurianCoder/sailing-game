@@ -3,12 +3,12 @@ import math
 # import random
 
 # TWEAK THESE
-MASS_BOAT = 400
-INERTIA_BOAT = 500
+MASS_BOAT = 200
+INERTIA_BOAT = 800
 OFFSET_CE_CLR = 0.01
 DRAG_HULL = 2
 DRAG_KEEL = 250.0
-DRAG_ROTATION = 1400.0
+DRAG_ROTATION = 2200.0
 
 RUDDER_POWER = 2000.0
 RUDDER_MAX = math.radians(45)
@@ -363,8 +363,6 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
     print(f'raw_lift: {raw_lift}')
     print(f'raw_drag: {raw_drag}')
     
-    
-    
     force_drag_hull = (state['velocity_forward'] * abs(state['velocity_forward'])) * DRAG_HULL
     # Sideways keel drag (prevents the boat from just sliding sideways)
     force_drag_keel = (state['velocity_lateral_drift'] * abs(state['velocity_lateral_drift'])) * DRAG_KEEL
@@ -410,11 +408,11 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
     speed_factor = state['velocity_forward'] 
     
     torque_rudder = math.sin(rudder_angle) * RUDDER_POWER * speed_factor
-    torque_drag_rotation = (current_rot_speed * abs(current_rot_speed)) * DRAG_ROTATION
+    torque_drag_rotation = ((current_rot_speed * abs(current_rot_speed)) * DRAG_ROTATION) / 2
     force_net_turning = torque_rudder - torque_drag_rotation
 
     acceleration_rotational = (force_net_turning / INERTIA_BOAT)
-    velocity_boat_rotation = current_rot_speed + (acceleration_rotational * DELTA_TIME)
+    velocity_boat_rotation = (current_rot_speed / 2) + (acceleration_rotational * DELTA_TIME)
 
     force_drag_keel = (velocity_lateral_drift * abs(velocity_lateral_drift)) * DRAG_KEEL
     force_net_keel = force_lateral - force_drag_keel
