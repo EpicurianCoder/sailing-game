@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Aug 28 14:07:41 2026
+
+@author: soloist
+"""
+
 import pygame
 import math
 import random
