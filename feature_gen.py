@@ -38,7 +38,7 @@ class FeatureGenerator:
             draw = ImageDraw.Draw(feature_image)
 
             # Use perlin noise and circles with amplitude value to draw islands
-            num_landmasses = random.randint(1, 4)
+            num_landmasses = random.randint(4, 11)
             for i in range(num_landmasses):
                 base_radius = random.uniform(14.0, 35.0)
                 noise_scale = random.uniform(0.7, 1.5)
@@ -61,12 +61,12 @@ class FeatureGenerator:
             coverage = land_pixels / (map_size * map_size)
 
             # Dont Cover more than 25%
-            if coverage > 0.25:
+            if coverage > 0.35:
                 continue
 
             # Protect Mid-Map Boat Starting Box (Sim Y around 128 -> Screen Y: 108 to 148)
             if any(pixels[max(0, min(map_size-1, x)), max(0, min(map_size-1, y))] == 1 
-                   for x in range(78, 178) for y in range(108, 148)):
+                   for x in range(78, 178) for y in range(192 - 32, 192 + 32)):
                 continue
 
             return feature_image, num_landmasses, coverage

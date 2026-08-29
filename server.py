@@ -18,6 +18,8 @@ app = FastAPI()
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
+global_land_mask = None
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 WIDTH, HEIGHT = 256, 256
@@ -33,7 +35,10 @@ async def index():
 
 @app.get("/api/map")
 def get_map():
+    global global_land_mask
     land_pil, num_islands, coverage = FeatureGenerator.gen_land_feature(WIDTH)
+    
+    global_land_mask = land_pil.load()
     
     rgba = Image.new("RGBA", land_pil.size, (0, 0, 0, 0))
     pixels = rgba.load()
@@ -55,7 +60,9 @@ async def physics_engine(websocket: WebSocket):
     await websocket.accept()
     
     # Generate random initial global wind direction
-    initial_wind_dir = random.uniform(-math.pi, math.pi)
+    initial_wind_dir = 0
+    while (abs(initial_wind_dir) < math.pi / 8) or (abs(initial_wind_dir) > (math.pi - math.pi / 4)):
+        initial_wind_dir = random.uniform(-math.pi, math.pi)
 
     state = {
         'global_wind_dir': initial_wind_dir, 
@@ -71,7 +78,7 @@ async def physics_engine(websocket: WebSocket):
         'out_of_control': -1,
         'boat_heading': 0.0, 
         'boat_x': 128.0, 
-        'boat_y': 128.0,
+        'boat_y': 64.0,
         'stress_value': 0.0, 
         'trajectory_history': [],
         'state': 'unassigned', 
@@ -115,20 +122,48 @@ async def physics_engine(websocket: WebSocket):
             vel_y = (math.cos(state['boat_heading']) * state['velocity_forward'] * ENGINE_DT) - \
                     (math.sin(state['boat_heading']) * state['velocity_lateral_drift'] * ENGINE_DT)
 
-            state['boat_x'] = (state['boat_x'] + vel_x) % WIDTH
-            state['boat_y'] = (state['boat_y'] + vel_y) % HEIGHT
+            new_x = state['boat_x'] + vel_x
+            new_y = state['boat_y'] + vel_y
             
-            # 6. Broadcast updated telemetry
+            status = 'playing'
+            
+            if new_x <= 0 or new_x >= WIDTH or new_y <= 0:
+                status = 'lose'
+            elif new_y >= HEIGHT:
+                if 64 <= new_x <= (WIDTH - 64):
+                    status = 'win'
+                else:
+                    status = 'lose'
+                    
+            if status == 'playing' and global_land_mask is not None:
+                # Physics Y is inverted relative to PIL image grid
+                img_x = int(max(0, min(WIDTH - 1, new_x)))
+                img_y = int(max(0, min(HEIGHT - 1, HEIGHT - new_y)))
+                if global_land_mask[img_x, img_y] == 1:
+                    status = 'lose'
+                    
+            state['boat_x'] = new_x
+            state['boat_y'] = new_y
+            
             await websocket.send_json({
                 'x': state['boat_x'],
                 'y': state['boat_y'],
                 'heading': state['boat_heading'],
                 'sail_angle': wrap_angle(state['boat_heading'] + state['relative_sail_angle']),
                 'wind_dir': state['global_wind_dir'],
-                'rudder': current_inputs['rudder'],
+                'raw_rudder': current_inputs['rudder'],
                 'rope_length': current_inputs['rope_length'],
-                'speed': round(state['velocity_forward'], 2)
+                'speed': round(state['velocity_forward'], 2),
+                'status': status
             })
+            
+            if current_inputs['rudder'] > 0:
+                current_inputs['rudder'] = max(0.0, round(current_inputs['rudder'] - 0.1, 2))
+            elif current_inputs['rudder'] < 0:
+                current_inputs['rudder'] = min(0.0, round(current_inputs['rudder'] + 0.1, 2))
+
+            if status != 'playing':
+                break
 
             await asyncio.sleep(0.111)
 

@@ -5,7 +5,7 @@ import math
 # TWEAK THESE
 MASS_BOAT = 400
 INERTIA_BOAT = 1000
-OFFSET_CE_CLR = 0.01
+OFFSET_CE_CLR = 0.08
 DRAG_HULL = 3
 DRAG_KEEL = 9
 DRAG_ROTATION = 2200.0
@@ -25,7 +25,7 @@ TWO_PI = math.pi * 2
 FLAP_ZONE = math.radians(5)
 SAIL_SWING_SPEED = 2.0
 
-BASE_LIFT_MULTIPLIER = 16.0
+BASE_LIFT_MULTIPLIER = 20.0
 BASE_DRAG_MULTIPLIER = 3.0
 
 ALIGN_STEP_SIZE = math.radians(20)
@@ -395,9 +395,10 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
     speed_dampening = 1.0 / (1.0 + (abs(state['velocity_forward']) * 0.15))
     effective_offset = OFFSET_CE_CLR * speed_dampening
 
-    torque_spine = (force_lateral * effective_offset)
-    torque_side = force_forward * (state['sail_size'] * math.sin(state['relative_sail_angle']))
-    torque_weather_helm = (torque_spine + torque_side) * direction_weather_helm
+    # Torque 1: The lateral wind force pushing sideways against the mast
+    torque_spine = force_lateral * effective_offset
+    torque_side = force_forward * -math.sin(state['relative_sail_angle']) * state['sail_size']
+    torque_weather_helm = torque_spine + torque_side
 
     velocity_forward = state.get('velocity_forward', 0.0)
     velocity_lateral_drift = state.get('velocity_lateral_drift', 0.0)
@@ -415,7 +416,7 @@ def boat_step(current_state: dict, physics_inputs_dict: dict):
     torque_drag_rotation = ((current_rot_speed * abs(current_rot_speed)) * DRAG_ROTATION) / 2
     
     # Calculate net turning force
-    force_net_turning = torque_rudder - torque_drag_rotation + (torque_weather_helm * 0.3)
+    force_net_turning = torque_rudder - torque_drag_rotation + (torque_weather_helm * 1.2)
     acceleration_rotational = (force_net_turning / INERTIA_BOAT)
     
     # 5. Integrate Velocities
